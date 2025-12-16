@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<server description="Debug Server">
+
+    <featureManager>
+        <feature>jsp-2.3</feature>
+        <feature>servlet-4.0</feature> </featureManager>
+
+    <application id="TestApp" location="test.war" type="war"/>
+
+</server>
