@@ -7,7 +7,6 @@ param(
 # 設定エリア
 # ========================================================
 # 検知対象の不正文字（スマートクォート等）
-# \uXXXX 形式の正規表現で指定（誤検知を防ぐため厳密に記述）
 $InvalidPattern = "[\u201C\u201D\u2018\u2019]" 
 
 # バックアップ保持世代数
@@ -31,7 +30,6 @@ $hasError = $false
 
 foreach ($line in Get-Content $TargetFilePath -Encoding UTF8) {
     $lineCount++
-
     if ($line -match $InvalidPattern) {
         Write-Host ""
         Write-Host "[FATAL ERROR] 構文エラーを検出しました。" -ForegroundColor Red
@@ -43,37 +41,46 @@ foreach ($line in Get-Content $TargetFilePath -Encoding UTF8) {
     }
 }
 
-# エラーがあれば即終了（ファイルは一切触らない）
 if ($hasError) {
     Write-Host ""
     Write-Host "処理を中断しました。ファイルは変更されていません。" -ForegroundColor Red
     exit 1
 }
 
+Write-Host "構文チェックOK。不正な文字はありませんでした。" -ForegroundColor Green
+
 # --- 2. 整形処理 (コメント削除) ---
-# ※XMLコメントは複数行にまたがることが多いため、ファイル全体を一括で読み込んで処理します
+Write-Host "コメント削除処理を実行中..." -NoNewline
+
 $rawContent = Get-Content -Path $TargetFilePath -Raw -Encoding UTF8
 
 # 正規表現で を削除
-# (?s) は改行を含んでマッチさせるオプション
-$newContent = $rawContent -replace '(?s)', ''
+$cleanedContent = $rawContent -replace '(?s)', ''
+# 連続する空行を整理
+$cleanedContent = $cleanedContent -replace '(\r\n){3,}', "`r`n`r`n"
 
-# 連続する空行を整理（3行以上の空行を2行に縮める）
-$newContent = $newContent -replace '(\r\n){3,}', "`r`n`r`n"
+# --- 3. 変更有無の確認 ---
+# 内容が変わっていない場合は、ここで終了する（バックアップも取らない）
+if ($rawContent -eq $cleanedContent) {
+    Write-Host " 変更なし" -ForegroundColor Yellow
+    Write-Host "削除対象のコメントや不要な空行はありませんでした。"
+    Write-Host "ファイルの更新をスキップします。" -ForegroundColor Cyan
+    exit 0
+}
 
+Write-Host " 完了" -ForegroundColor Green
+Write-Host "ファイル内容に変更があります。更新プロセスへ進みます。" -ForegroundColor Cyan
 
 # ========================================================
 # バックアップ & 更新処理
 # ========================================================
-
-Write-Host "チェックOK。更新処理を開始します..." -ForegroundColor Green
 
 # 1. ファイル情報の取得
 $fileItem = Get-Item $TargetFilePath
 $dir = $fileItem.DirectoryName
 $baseName = $fileItem.Name
 
-# 2. バックアップ作成 (server.xml -> server.xml.yyyyMMdd_HHmmss.bak)
+# 2. バックアップ作成
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $backupName = "$baseName.$timestamp.bak"
 $backupPath = Join-Path $dir $backupName
@@ -83,17 +90,16 @@ try {
     Write-Host "バックアップ作成: $backupName" -ForegroundColor Gray
 }
 catch {
-    Write-Error "バックアップ作成（リネーム）に失敗しました。処理を中止します。"
+    Write-Error "バックアップ作成に失敗しました。処理を中止します。"
     exit 1
 }
 
 # 3. 新ファイル書き出し
 try {
-    # BOMなしUTF-8で保存
     $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($TargetFilePath, $newContent, $Utf8NoBom)
+    [System.IO.File]::WriteAllText($TargetFilePath, $cleanedContent, $Utf8NoBom)
     
-    Write-Host "更新完了: $baseName を再生成しました。" -ForegroundColor Green
+    Write-Host "更新完了: コメントを除去したファイルを生成しました。" -ForegroundColor Green
 }
 catch {
     Write-Error "ファイルの書き込みに失敗しました。"
@@ -101,10 +107,8 @@ catch {
 }
 
 # ========================================================
-# 世代管理 (ローテーション)
+# 世代管理
 # ========================================================
-
-# 対象ファイルのバックアップのみを抽出 (例: server.xml.*.bak)
 $backupPattern = "$baseName.*.bak"
 $backupList = Get-ChildItem -Path $dir -Filter $backupPattern | Sort-Object Name -Descending
 
