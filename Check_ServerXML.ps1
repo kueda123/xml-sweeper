@@ -1,142 +1,112 @@
+<#
+.SYNOPSIS
+    Server XML Integrity Checker & Sweeper
+    - スマートクォート: 検知したらエラー終了 (手動修正待ち)
+    - NBSP: 検知したら自動置換して保存 (バックアップ作成)
+#>
+
 param(
     [Parameter(Mandatory=$true)]
     [string]$TargetFilePath
 )
 
-# .NETクラスのロード
-Add-Type -AssemblyName System.Text.RegularExpressions
-
 # ========================================================
 # 設定エリア
 # ========================================================
-$InvalidPattern = "[\u201C\u201D\u2018\u2019]" 
+# エラー停止対象: スマートクォート
+$FatalPattern = "[\u201C\u201D\u2018\u2019]" 
+# 自動修正対象: NBSP (No-Break Space) -> 半角スペース(0x20)へ置換
+$FixPattern   = "\u00A0"
 $MaxGenerations = 5
 
-# ========================================================
-# メイン処理
-# ========================================================
-
-Write-Host "処理開始: $TargetFilePath" -ForegroundColor Cyan
+# コンソール表示設定
+$Host.UI.RawUI.ForegroundColor = "Gray"
+Write-Host "--------------------------------------------------"
+Write-Host " Server XML Integrity Checker & Sweeper"
+Write-Host "--------------------------------------------------"
+Write-Host "対象: $TargetFilePath" -ForegroundColor Cyan
 
 if (-not (Test-Path $TargetFilePath)) {
-    Write-Error "指定されたファイルが見つかりません。"
+    Write-Host "[ERROR] ファイルが見つかりません。" -ForegroundColor Red
     exit 1
 }
 
-# --- 1. ファイル読み込み & 構文チェック ---
+# ========================================================
+# 1. ファイル読み込み & 構文チェック (Smart Quote)
+# ========================================================
 try {
+    # 全文読み込み
     $rawContent = [System.IO.File]::ReadAllText($TargetFilePath, [System.Text.Encoding]::UTF8)
 }
 catch {
-    Write-Error "ファイルの読み込みに失敗しました: $_"
+    Write-Host "[ERROR] 読み込み失敗: $_" -ForegroundColor Red
     exit 1
 }
 
-# スマートクォートのチェック
-if ($rawContent -match $InvalidPattern) {
-    # 行番号特定のため再度読み込み
+# スマートクォートチェック (これは自動修正せず、ユーザーに直させる)
+if ($rawContent -match $FatalPattern) {
+    # 行番号を特定するために行ごとに再スキャン
     $lines = [System.IO.File]::ReadAllLines($TargetFilePath, [System.Text.Encoding]::UTF8)
     $lineNum = 0
     foreach ($line in $lines) {
         $lineNum++
-        if ($line -match $InvalidPattern) {
+        if ($line -match $FatalPattern) {
             Write-Host ""
-            Write-Host "[FATAL ERROR] 構文エラーを検出しました。" -ForegroundColor Red
-            Write-Host "  行番号: $lineNum" -ForegroundColor Yellow
-            Write-Host "  該当行: $($line.Trim())" -ForegroundColor Yellow
-            Write-Host "  理由  : Word等のオートフォーマットによる不正な引用符（“ ” ‘ ’）が含まれています。" -ForegroundColor Red
-            break
+            Write-Host "[FATAL ERROR] 修復不可能な不正文字を検出しました (行: $lineNum)" -ForegroundColor Red
+            Write-Host "--------------------------------------------------" -ForegroundColor Red
+            Write-Host "該当行: $($line.Trim())" -ForegroundColor Yellow
+            Write-Host "理由  : スマートクォート（“ ” ‘ ’）が含まれています。" -ForegroundColor Red
+            Write-Host "        引用符の誤りは論理的な問題の可能性があるため、自動修正しません。" -ForegroundColor Gray
+            Write-Host "--------------------------------------------------" -ForegroundColor Red
+            Write-Host "処理を中断しました。エディタで修正してください。" -ForegroundColor Red
+            exit 1
         }
     }
+}
+
+# ========================================================
+# 2. 自動修正処理 (NBSP -> Space)
+# ========================================================
+$fixedContent = $rawContent -replace $FixPattern, " "
+
+# 変更有無の確認
+if ($rawContent -eq $fixedContent) {
     Write-Host ""
-    Write-Host "処理を中断しました。ファイルは変更されていません。" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "構文チェックOK。" -ForegroundColor Green
-
-# --- 2. コメント検出 & 削除 ---
-Write-Host "コメント削除処理を実行中..." -NoNewline
-
-# ★修正: シングルクォートを使用し、RegexOptions.Singleline (s) を明示的に指定
-# これにより「.」が改行を含むようになります
-$regexPattern = ''
-$regexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline
-$regex = [System.Text.RegularExpressions.Regex]::new($regexPattern, $regexOptions)
-
-# マッチング実行
-$foundMatches = $regex.Matches($rawContent)
-$matchCount = $foundMatches.Count
-
-if ($matchCount -gt 0) {
-    Write-Host " [検出: $matchCount 箇所]" -ForegroundColor Yellow
-    
-    # ★デバッグ: 何がマッチしたのか最初の3件を表示（これで原因がわかります）
-    Write-Host "  DEBUG: 検出内容サンプル:" -ForegroundColor DarkGray
-    for ($i = 0; $i -lt [Math]::Min($matchCount, 3); $i++) {
-        $val = $foundMatches[$i].Value
-        # 改行を含むと見づらいので1行に縮める
-        $displayVal = $val -replace "\r\n|\n", " " 
-        if ($displayVal.Length -gt 60) { $displayVal = $displayVal.Substring(0, 60) + "..." }
-        Write-Host "  [$i] '$displayVal'" -ForegroundColor DarkGray
-    }
-} else {
-    Write-Host " [検出なし]" -ForegroundColor Gray
-}
-
-# 置換実行
-$cleanedContent = $regex.Replace($rawContent, "")
-
-# --- 3. 空行の整理 ---
-# 3つ以上の改行を2つに
-$regexSpace = [System.Text.RegularExpressions.Regex]::new("(\r\n){3,}")
-$cleanedContent = $regexSpace.Replace($cleanedContent, "`r`n`r`n")
-
-# --- 4. 変更有無の確認 ---
-if ($rawContent -eq $cleanedContent) {
-    Write-Host "変更なし" -ForegroundColor Yellow
-    Write-Host "削除対象のコメントや不要な空行はありませんでした。"
-    Write-Host "ファイルの更新をスキップします。" -ForegroundColor Cyan
+    Write-Host "○ 判定: OK (変更なし)" -ForegroundColor Green
+    Write-Host "  不正な文字（スマートクォート, NBSP）はありませんでした。"
     exit 0
 }
 
-Write-Host "ファイル内容に変更があります。更新プロセスへ進みます。" -ForegroundColor Cyan
-
 # ========================================================
-# バックアップ & 更新処理
+# 3. 更新 & ローテーション処理
 # ========================================================
+Write-Host ""
+Write-Host "！ NBSP(ノーブレークスペース) を検出しました。" -ForegroundColor Yellow
+Write-Host "   -> 半角スペースに自動置換して保存します。" -ForegroundColor Cyan
 
 $fileItem = Get-Item $TargetFilePath
 $dir = $fileItem.DirectoryName
 $baseName = $fileItem.Name
-
-# バックアップ作成
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $backupName = "$baseName.$timestamp.bak"
-$backupPath = Join-Path $dir $backupName
 
 try {
+    # バックアップ作成
     Rename-Item -Path $TargetFilePath -NewName $backupName -ErrorAction Stop
     Write-Host "バックアップ作成: $backupName" -ForegroundColor Gray
-}
-catch {
-    Write-Error "バックアップ作成に失敗しました。処理を中止します。"
-    exit 1
-}
-
-# 新ファイル書き出し
-try {
+    
+    # 新ファイル書き出し (BOMなしUTF-8)
     $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($TargetFilePath, $cleanedContent, $Utf8NoBom)
-    Write-Host "更新完了: コメントを除去したファイルを生成しました。" -ForegroundColor Green
+    [System.IO.File]::WriteAllText($TargetFilePath, $fixedContent, $Utf8NoBom)
+    Write-Host "更新完了: クリーニング済みのファイルを生成しました。" -ForegroundColor Green
 }
 catch {
-    Write-Error "ファイルの書き込みに失敗しました。"
+    Write-Host "[ERROR] ファイル更新失敗: $_" -ForegroundColor Red
     exit 1
 }
 
 # ========================================================
-# 世代管理
+# 4. 世代管理 (ローテーション)
 # ========================================================
 $backupPattern = "$baseName.*.bak"
 $backupList = Get-ChildItem -Path $dir -Filter $backupPattern | Sort-Object Name -Descending
