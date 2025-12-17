@@ -3,13 +3,13 @@ param(
     [string]$TargetFilePath
 )
 
+# .NETクラスのロード
+Add-Type -AssemblyName System.Text.RegularExpressions
+
 # ========================================================
 # 設定エリア
 # ========================================================
-# 検知対象の不正文字（スマートクォート等）
 $InvalidPattern = "[\u201C\u201D\u2018\u2019]" 
-
-# バックアップ保持世代数
 $MaxGenerations = 5
 
 # ========================================================
@@ -23,64 +23,94 @@ if (-not (Test-Path $TargetFilePath)) {
     exit 1
 }
 
-# --- 1. 構文チェック (Fail Fast) ---
-# 行ごとに読み込んで不正文字がないか確認する
-$lineCount = 0
-$hasError = $false
-
-foreach ($line in Get-Content $TargetFilePath -Encoding UTF8) {
-    $lineCount++
-    if ($line -match $InvalidPattern) {
-        Write-Host ""
-        Write-Host "[FATAL ERROR] 構文エラーを検出しました。" -ForegroundColor Red
-        Write-Host "  行番号: $lineCount" -ForegroundColor Yellow
-        Write-Host "  該当行: $line" -ForegroundColor Yellow
-        Write-Host "  理由  : Word等のオートフォーマットによる不正な引用符（“ ” ‘ ’）が含まれています。" -ForegroundColor Red
-        $hasError = $true
-        break
-    }
+# --- 1. ファイル読み込み & 構文チェック ---
+try {
+    $rawContent = [System.IO.File]::ReadAllText($TargetFilePath, [System.Text.Encoding]::UTF8)
+}
+catch {
+    Write-Error "ファイルの読み込みに失敗しました: $_"
+    exit 1
 }
 
-if ($hasError) {
+# スマートクォートのチェック
+if ($rawContent -match $InvalidPattern) {
+    # 行番号特定のため再度読み込み
+    $lines = [System.IO.File]::ReadAllLines($TargetFilePath, [System.Text.Encoding]::UTF8)
+    $lineNum = 0
+    foreach ($line in $lines) {
+        $lineNum++
+        if ($line -match $InvalidPattern) {
+            Write-Host ""
+            Write-Host "[FATAL ERROR] 構文エラーを検出しました。" -ForegroundColor Red
+            Write-Host "  行番号: $lineNum" -ForegroundColor Yellow
+            Write-Host "  該当行: $($line.Trim())" -ForegroundColor Yellow
+            Write-Host "  理由  : Word等のオートフォーマットによる不正な引用符（“ ” ‘ ’）が含まれています。" -ForegroundColor Red
+            break
+        }
+    }
     Write-Host ""
     Write-Host "処理を中断しました。ファイルは変更されていません。" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "構文チェックOK。不正な文字はありませんでした。" -ForegroundColor Green
+Write-Host "構文チェックOK。" -ForegroundColor Green
 
-# --- 2. 整形処理 (コメント削除) ---
+# --- 2. コメント検出 & 削除 ---
 Write-Host "コメント削除処理を実行中..." -NoNewline
 
-$rawContent = Get-Content -Path $TargetFilePath -Raw -Encoding UTF8
+# ★修正: シングルクォートを使用し、RegexOptions.Singleline (s) を明示的に指定
+# これにより「.」が改行を含むようになります
+$regexPattern = ''
+$regexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline
+$regex = [System.Text.RegularExpressions.Regex]::new($regexPattern, $regexOptions)
 
-# 正規表現で を削除
-$cleanedContent = $rawContent -replace '(?s)', ''
-# 連続する空行を整理
-$cleanedContent = $cleanedContent -replace '(\r\n){3,}', "`r`n`r`n"
+# マッチング実行
+$foundMatches = $regex.Matches($rawContent)
+$matchCount = $foundMatches.Count
 
-# --- 3. 変更有無の確認 ---
-# 内容が変わっていない場合は、ここで終了する（バックアップも取らない）
+if ($matchCount -gt 0) {
+    Write-Host " [検出: $matchCount 箇所]" -ForegroundColor Yellow
+    
+    # ★デバッグ: 何がマッチしたのか最初の3件を表示（これで原因がわかります）
+    Write-Host "  DEBUG: 検出内容サンプル:" -ForegroundColor DarkGray
+    for ($i = 0; $i -lt [Math]::Min($matchCount, 3); $i++) {
+        $val = $foundMatches[$i].Value
+        # 改行を含むと見づらいので1行に縮める
+        $displayVal = $val -replace "\r\n|\n", " " 
+        if ($displayVal.Length -gt 60) { $displayVal = $displayVal.Substring(0, 60) + "..." }
+        Write-Host "  [$i] '$displayVal'" -ForegroundColor DarkGray
+    }
+} else {
+    Write-Host " [検出なし]" -ForegroundColor Gray
+}
+
+# 置換実行
+$cleanedContent = $regex.Replace($rawContent, "")
+
+# --- 3. 空行の整理 ---
+# 3つ以上の改行を2つに
+$regexSpace = [System.Text.RegularExpressions.Regex]::new("(\r\n){3,}")
+$cleanedContent = $regexSpace.Replace($cleanedContent, "`r`n`r`n")
+
+# --- 4. 変更有無の確認 ---
 if ($rawContent -eq $cleanedContent) {
-    Write-Host " 変更なし" -ForegroundColor Yellow
+    Write-Host "変更なし" -ForegroundColor Yellow
     Write-Host "削除対象のコメントや不要な空行はありませんでした。"
     Write-Host "ファイルの更新をスキップします。" -ForegroundColor Cyan
     exit 0
 }
 
-Write-Host " 完了" -ForegroundColor Green
 Write-Host "ファイル内容に変更があります。更新プロセスへ進みます。" -ForegroundColor Cyan
 
 # ========================================================
 # バックアップ & 更新処理
 # ========================================================
 
-# 1. ファイル情報の取得
 $fileItem = Get-Item $TargetFilePath
 $dir = $fileItem.DirectoryName
 $baseName = $fileItem.Name
 
-# 2. バックアップ作成
+# バックアップ作成
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $backupName = "$baseName.$timestamp.bak"
 $backupPath = Join-Path $dir $backupName
@@ -94,11 +124,10 @@ catch {
     exit 1
 }
 
-# 3. 新ファイル書き出し
+# 新ファイル書き出し
 try {
     $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($TargetFilePath, $cleanedContent, $Utf8NoBom)
-    
     Write-Host "更新完了: コメントを除去したファイルを生成しました。" -ForegroundColor Green
 }
 catch {
