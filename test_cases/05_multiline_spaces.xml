@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<server>
+
+
+&lt;featureManager&gt;
+    &lt;feature&gt;servlet-4.0&lt;/feature&gt;
+&lt;/featureManager&gt;
+
+
+&lt;/server&gt;
+
+    
+  

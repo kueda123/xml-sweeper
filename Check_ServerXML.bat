@@ -1,26 +1,31 @@
 @echo off
-setlocal
+cd /d %~dp0
 
-REM ========================================================
-REM server.xml 整合性チェック＆整形ツール 起動バッチ
-REM ========================================================
+rem 引数がない場合は終了
+if "%~1"=="" goto :eof
 
-REM 引数チェック（ドラッグ＆ドロップされたか）
-if "%~1"=="" (
-    echo [ERROR] ファイルが指定されていません。
-    echo 処理対象の server.xml をこのバッチファイルにドロップしてください。
-    pause
-    exit /b
-)
 
-REM PowerShellスクリプトのパス設定（バッチと同じ階層）
-set "PS_SCRIPT=%~dp0Check_ServerXML.ps1"
+:loop
+rem ファイルが存在するかチェック
+if not exist "%~1" goto :next
 
-REM PowerShell実行
-REM -NoProfile: プロファイル読み込みなし（高速化・環境依存排除）
-REM -ExecutionPolicy Bypass: 実行ポリシーの一時的な回避
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" "%~1"
 
-REM 処理結果確認のため一時停止
+echo -------------------------------------------------------
+echo Target: %~nx1
+echo -------------------------------------------------------
+
+
+rem PowerShell呼び出し (ファイルごとに実行)
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\xml-sweeper.ps1" -TargetFilePath "%~1"
+
+
+rem 次の引数（ファイル）へシフト
+:next
+shift
+if not "%~1"=="" goto :loop
+
+
 echo.
+echo =======================================================
+echo All tasks finished.
 pause

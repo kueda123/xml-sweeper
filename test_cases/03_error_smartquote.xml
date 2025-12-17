@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<server description=“MyServer”>
+<featureManager>
+<feature>servlet-4.0</feature>
+</featureManager>
+</server>
