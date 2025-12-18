@@ -1,44 +1,52 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
-rem -------------------------------------------------------
-rem プログラム（ps1）のパスを絶対パスで確定させる
-rem %~dp0 はこのバッチファイルが存在するドライブとフォルダのパスです
-rem -------------------------------------------------------
-rem ★修正: 実際のファイル名 "Check_ServerXML.ps1" に合わせました
-set "SCRIPT_PATH=%~dp0Check_ServerXML.ps1"
+REM ========================================================
+REM  Server XML Integrity Checker Launcher
+REM ========================================================
 
-rem ps1ファイルがバッチと同じ場所にあるか確認
-if not exist "%SCRIPT_PATH%" (
-    echo [ERROR] PowerShell script not found at:
-    echo "%SCRIPT_PATH%"
+REM --- 1. スクリプトの絶対パスを確定 (%~dp0 はこのbatの場所) ---
+set "SCRIPT_DIR=%~dp0"
+set "PS_SCRIPT=%SCRIPT_DIR%Check_ServerXML.ps1"
+
+REM 念のため確認（万が一見つからない場合は停止）
+if not exist "%PS_SCRIPT%" (
     echo.
-    echo Please ensure Check_ServerXML.ps1 is in the same folder as this batch file.
+    echo [ERROR] PowerShell script not found!
+    echo Looked in: "%PS_SCRIPT%"
+    echo.
+    echo Please ensure .bat and .ps1 are in the SAME folder.
     pause
     exit /b 1
 )
 
-rem 引数がない場合は終了
-if "%~1"=="" goto :eof
+REM カウンター初期化
+set /a count=0
 
-:loop
-rem ドラッグされたファイルが存在するかチェック
-if not exist "%~1" goto :next
+:LOOP
+if "%~1"=="" goto FINISH
 
-echo -------------------------------------------------------
+REM カウントアップ
+set /a count+=1
+
+REM --- 2. 区切り線を太線(====)に変更 ---
+echo ===============================================================================
 echo Target: %~1
-echo -------------------------------------------------------
+echo -------------------------------------------------------------------------------
 
-rem PowerShell呼び出し
-rem -File には先ほど確定させた絶対パス(%SCRIPT_PATH%)を渡す
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_PATH%" -TargetFilePath "%~1"
+REM --- 3. 確定させた絶対パスで呼び出し ---
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -TargetFilePath "%~1"
 
-rem 次の引数（ファイル）へシフト
-:next
+REM 次のファイルへ
 shift
-if not "%~1"=="" goto :loop
+goto LOOP
 
+:FINISH
+echo ===============================================================================
 echo.
-echo =======================================================
-echo All tasks finished.
+echo  [Summary]
+echo  Total files processed: %count%
+echo.
+echo ===============================================================================
 pause
+

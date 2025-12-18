@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <server>
-    <data><![CDATA[ ここはCDATAセクションです。通常の引用符 " " はOKです。 ]]></data>
+    <data><![CDATA[ スマートクォートっぽい記号 " " はOK ]]></data>
 
 
     </server>

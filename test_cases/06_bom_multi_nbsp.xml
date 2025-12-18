@@ -1,0 +1,5 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<server>
+    <variable name="Path1" value="C:\Program Files" />
+    <variable name="Path2" value="D:\Data Center" />
+</server>
