@@ -3,10 +3,7 @@ $TestDir = Join-Path $PWD "test_cases"
 if (-not (Test-Path $TestDir)) { New-Item -ItemType Directory -Path $TestDir | Force | Out-Null }
 Write-Host "テストデータを生成しています..." -ForegroundColor Cyan
 
-# =========================================================
-# CASE 1: 正常なファイル
-# [期待値] ○ OK (変更なし)
-# =========================================================
+# [01] 正常
 $Content1 = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <server description="Normal Server">
@@ -15,15 +12,10 @@ $Content1 = @"
     </featureManager>
 </server>
 "@
-$Path1 = Join-Path $TestDir "01_clean.xml"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText($Path1, $Content1, $Utf8NoBom)
+[System.IO.File]::WriteAllText((Join-Path $TestDir "01_clean.xml"), $Content1, $Utf8NoBom)
 
-
-# =========================================================
-# CASE 2: スマートクォート混入
-# [期待値] × FATAL ERROR (処理中断)
-# =========================================================
+# [02] スマートクォート (Fail)
 $Content2 = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <server description=“MyServer”>
@@ -32,14 +24,9 @@ $Content2 = @"
     </featureManager>
 </server>
 "@
-$Path2 = Join-Path $TestDir "02_error_smartquote.xml"
-[System.IO.File]::WriteAllText($Path2, $Content2, $Utf8NoBom)
+[System.IO.File]::WriteAllText((Join-Path $TestDir "02_error_smartquote.xml"), $Content2, $Utf8NoBom)
 
-
-# =========================================================
-# CASE 3: NBSP (No-Break Space) 混入
-# [期待値] ！ 自動修正 (NBSP除去 & 更新)
-# =========================================================
+# [03] NBSP (Auto-Fix)
 $NBSP = [char]0x00A0
 $Content3 = @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,49 +34,27 @@ $Content3 = @"
     <httpEndpoint id="defaultHttpEndpoint"${NBSP}host="*" />
 </server>
 "@
-$Path3 = Join-Path $TestDir "03_fix_nbsp.xml"
-[System.IO.File]::WriteAllText($Path3, $Content3, $Utf8NoBom)
+[System.IO.File]::WriteAllText((Join-Path $TestDir "03_fix_nbsp.xml"), $Content3, $Utf8NoBom)
 
-
-# =========================================================
-# CASE 4: BOM (Byte Order Mark) 付き
-# [期待値] ！ 自動修正 (BOM除去 & 更新)
-# =========================================================
+# [04] BOM (Auto-Fix)
 $Content4 = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <server description="BOM_TEST">
     </server>
 "@
-$Path4 = Join-Path $TestDir "04_fix_bom.xml"
-# BOM付きUTF-8で書き込む
+# BOM付きで書き込み
 $Utf8WithBom = New-Object System.Text.UTF8Encoding $true
-[System.IO.File]::WriteAllText($Path4, $Content4, $Utf8WithBom)
+[System.IO.File]::WriteAllText((Join-Path $TestDir "04_fix_bom.xml"), $Content4, $Utf8WithBom)
 
-
-# =========================================================
-# CASE 5: CDATAや大量の空行 (誤検知チェック)
-# [期待値] ○ OK (変更なし)
-# ※整形機能は廃止されたため、空行もそのまま残るのが正解
-# =========================================================
+# [05] Messy Format (OK) - スマートクォートを排除
 $Content5 = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <server>
-    <data><![CDATA[ スマートクォートっぽい記号 “ ” もCDATA内なら無視されるべき？ 
-       (※現在の仕様では単純文字列マッチなのでCDATA内でもエラーになる可能性がありますが、
-        今回は「誤って消えないか」を確認します) ]]></data>
+    <data><![CDATA[ ここはCDATAセクションです。通常の引用符 " " はOKです。 ]]></data>
 
 
     </server>
 "@
-$Path5 = Join-Path $TestDir "05_messy_format.xml"
-[System.IO.File]::WriteAllText($Path5, $Content5, $Utf8NoBom)
+[System.IO.File]::WriteAllText((Join-Path $TestDir "05_messy_format.xml"), $Content5, $Utf8NoBom)
 
-
-Write-Host "生成完了: $TestDir に5つのファイルを保存しました。" -ForegroundColor Green
-Write-Host "--------------------------------------------------"
-Write-Host " [01] 正常 -> OK"
-Write-Host " [02] SmartQuote -> FATAL ERROR"
-Write-Host " [03] NBSP -> 自動修正"
-Write-Host " [04] BOM  -> 自動修正"
-Write-Host " [05] Messy -> OK (変更なし)"
-Write-Host "--------------------------------------------------"
+Write-Host "生成完了: 5つのファイルを保存しました。" -ForegroundColor Green
