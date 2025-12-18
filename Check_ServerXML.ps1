@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Server XML Integrity Checker & Sweeper
-    - スマートクォート: エラー終了
+    - スマートクォート: 検証NG (手動修正)
     - NBSP: 自動置換 (Space)
     - BOM: 自動除去 (UTF-8 NoBOM化)
 #>
@@ -56,7 +56,7 @@ catch {
     exit 1
 }
 
-# スマートクォート (Fatal Error)
+# スマートクォート (Validation Error)
 if ($rawContent -match $FatalPattern) {
     # 行番号特定のため再スキャン
     $lines = [System.IO.File]::ReadAllLines($TargetFilePath, [System.Text.Encoding]::UTF8)
@@ -65,12 +65,14 @@ if ($rawContent -match $FatalPattern) {
         $lineNum++
         if ($line -match $FatalPattern) {
             Write-Host ""
-            Write-Host "[FATAL ERROR] 修復不可能な不正文字を検出しました (行: $lineNum)" -ForegroundColor Red
+            # ★修正箇所: VALIDATION ERROR (要修正)
+            Write-Host "× [VALIDATION ERROR] (要修正) 不正な文字を検出しました (行: $lineNum)" -ForegroundColor Red
             Write-Host "--------------------------------------------------" -ForegroundColor Red
             Write-Host "該当行: $($line.Trim())" -ForegroundColor Yellow
             Write-Host "理由  : スマートクォート（“ ” ‘ ’）が含まれています。" -ForegroundColor Red
             Write-Host "--------------------------------------------------" -ForegroundColor Red
-            Write-Host "処理を中断しました。エディタで修正してください。" -ForegroundColor Red
+            Write-Host "処置  : 処理を中断しました。ファイルは変更されていません。" -ForegroundColor Red
+            Write-Host "        エディタで正しい引用符に修正してください。" -ForegroundColor Gray
             exit 1
         }
     }
