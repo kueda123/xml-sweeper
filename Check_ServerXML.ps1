@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
     Server XML Integrity Checker & Sweeper
-    - スマートクォート: 検証NG (手動修正)
-    - NBSP: 自動置換 (Space)
-    - BOM: 自動除去 (UTF-8 NoBOM化)
+    EXIT CODES:
+      0 : OK / Fixed (正常終了)
+      1 : Error (ファイルなし, 読込失敗, Validation Error)
+      2 : Skipped (除外拡張子)
 #>
 
 param(
@@ -18,6 +19,13 @@ $FatalPattern = "[\u201C\u201D\u2018\u2019]"
 $FixPattern   = "\u00A0"
 $MaxGenerations = 5
 
+# LF変換対象拡張子
+$ExtensionsToForceLF = @(".xml", ".properties", ".jvm.options", ".env", ".sh")
+
+# 除外拡張子
+$ExcludeExtensions = @(".bak", ".tmp", ".zip", ".jar", ".class", ".exe", ".dll", ".png", ".jpg", ".ico")
+
+
 $Host.UI.RawUI.ForegroundColor = "Gray"
 Write-Host "--------------------------------------------------"
 Write-Host " Server XML Integrity Checker & Sweeper"
@@ -30,11 +38,25 @@ if (-not (Test-Path $TargetFilePath)) {
 }
 
 # ========================================================
-# 1. BOM (Byte Order Mark) チェック
+# 0. 拡張子チェック (Skip判定)
+# ========================================================
+$ext = [System.IO.Path]::GetExtension($TargetFilePath).ToLower()
+
+if ($ExcludeExtensions -contains $ext) {
+    Write-Host ""
+    Write-Host "- [SKIP] 除外対象の拡張子のためスキップ ($ext)" -ForegroundColor DarkGray
+    # ★変更点: バッチが集計できるように Exit Code 2 を返す
+    exit 2
+}
+
+# LF変換対象か
+$shouldConvertToLF = ($ExtensionsToForceLF -contains $ext)
+
+# ========================================================
+# 1. BOM チェック
 # ========================================================
 $hasBOM = $false
 try {
-    # .NETメソッドでバイナリとして先頭3バイトを確認 (確実)
     $bytes = [System.IO.File]::ReadAllBytes($TargetFilePath)
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
         $hasBOM = $true
@@ -48,24 +70,21 @@ catch {
 # 2. テキスト読み込み & スマートクォート検査
 # ========================================================
 try {
-    # テキストとして全読み込み
     $rawContent = [System.IO.File]::ReadAllText($TargetFilePath, [System.Text.Encoding]::UTF8)
 }
 catch {
-    Write-Host "[ERROR] テキスト読み込み失敗: $_" -ForegroundColor Red
+    Write-Host "[ERROR] ファイル読み込み失敗: $_" -ForegroundColor Red
     exit 1
 }
 
 # スマートクォート (Validation Error)
 if ($rawContent -match $FatalPattern) {
-    # 行番号特定のため再スキャン
     $lines = [System.IO.File]::ReadAllLines($TargetFilePath, [System.Text.Encoding]::UTF8)
     $lineNum = 0
     foreach ($line in $lines) {
         $lineNum++
         if ($line -match $FatalPattern) {
             Write-Host ""
-            # ★修正箇所: VALIDATION ERROR (要修正)
             Write-Host "× [VALIDATION ERROR] (要修正) 不正な文字を検出しました (行: $lineNum)" -ForegroundColor Red
             Write-Host "--------------------------------------------------" -ForegroundColor Red
             Write-Host "該当行: $($line.Trim())" -ForegroundColor Yellow
@@ -79,18 +98,31 @@ if ($rawContent -match $FatalPattern) {
 }
 
 # ========================================================
-# 3. NBSP 除去処理
+# 3. 自動修正処理
 # ========================================================
-$fixedContent = $rawContent -replace $FixPattern, " "
-$hasNBSP = ($rawContent -ne $fixedContent)
+$tempContent = $rawContent -replace $FixPattern, " "
+$hasNBSP = ($rawContent -ne $tempContent)
+
+$hasCRLF = $false
+$fixedContent = $tempContent
+
+if ($shouldConvertToLF) {
+    $fixedContent = $tempContent -replace "`r`n", "`n"
+    if ($tempContent -ne $fixedContent) {
+        $hasCRLF = $true
+    }
+}
 
 # ========================================================
 # 4. 判定と更新アクション
 # ========================================================
-if ((-not $hasNBSP) -and (-not $hasBOM)) {
+if ((-not $hasNBSP) -and (-not $hasBOM) -and (-not $hasCRLF)) {
     Write-Host ""
     Write-Host "○ 判定: OK (変更なし)" -ForegroundColor Green
-    Write-Host "  不正な文字やBOMは検出されませんでした。"
+    Write-Host "  不正文字・BOM・改行コードの不整合は検出されませんでした。"
+    if (-not $shouldConvertToLF) {
+        Write-Host "  (※ この拡張子は改行コード変換の対象外です: $ext)" -ForegroundColor DarkGray
+    }
     exit 0
 }
 
@@ -103,6 +135,11 @@ if ($hasBOM) {
     Write-Host "！ BOM (Byte Order Mark) を検出しました。" -ForegroundColor Yellow
     Write-Host "   -> BOMを除去します。" -ForegroundColor Gray
 }
+if ($hasCRLF) {
+    Write-Host "！ Windows改行コード (CRLF) を検出しました。" -ForegroundColor Yellow
+    Write-Host "   -> Linux形式 (LF) に変換します。" -ForegroundColor Gray
+}
+
 Write-Host "   ファイルを更新します..." -ForegroundColor Cyan
 
 # ========================================================
@@ -118,7 +155,6 @@ try {
     Rename-Item -Path $TargetFilePath -NewName $backupName -ErrorAction Stop
     Write-Host "バックアップ作成: $backupName" -ForegroundColor Gray
     
-    # 新ファイル書き出し (BOMなしUTF-8)
     $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($TargetFilePath, $fixedContent, $Utf8NoBom)
     
@@ -142,5 +178,5 @@ if ($backupList.Count -gt $MaxGenerations) {
 }
 
 Write-Host ""
-Write-Host "全処理が正常に終了しました。" -ForegroundColor Cyan
+Write-Host "ファイル処理完了。" -ForegroundColor Cyan
 exit 0
