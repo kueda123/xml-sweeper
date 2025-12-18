@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <server>
-    <data><![CDATA[ スマートクォートっぽい記号 “ ” もCDATA内なら無視されるべき？ 
-       (※現在の仕様では単純文字列マッチなのでCDATA内でもエラーになる可能性がありますが、
-        今回は「誤って消えないか」を確認します) ]]></data>
+    <data><![CDATA[ ここはCDATAセクションです。通常の引用符 " " はOKです。 ]]></data>
 
 
     </server>
